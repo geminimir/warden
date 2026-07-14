@@ -1,0 +1,60 @@
+name: Feature request
+description: Propose a new capability or a change to existing behavior.
+title: "feat: <short summary>"
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Warden ships in milestones (W0 → W5) with explicit acceptance criteria per issue. Before opening a feature request:
+
+        - Check the [milestones](https://github.com/geminimir/warden/milestones) — your idea may already be planned.
+        - If it's out of scope for a given milestone, it's not a bug — it's P1 or later. That's fine; file it anyway.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the situation you're trying to handle. Focus on the problem before the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like Warden to do? Sketch the API or workflow if you can.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What else could work? Why is your proposal better?
+
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Which milestone does this belong to?
+      description: Best guess — a maintainer will confirm.
+      options:
+        - "W0 — Reference oracle + property harness"
+        - "W1 — ReBAC core"
+        - "W2 — Label materialization + retrieval index"
+        - "W3 — Gateway + agent lifecycle"
+        - "W4 — Eval harness + benchmarks"
+        - "W5 — Ship it"
+        - "P1 — after all P0 milestones ship"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: security
+    attributes:
+      label: Security implications
+      description: Does this change touch the authorization semantics, the pre-filter, Gate 2, Gate 3, or the audit log?
+      options:
+        - label: Yes — this change is security-sensitive and needs the differential harness to protect it.
+        - label: No — this is purely additive tooling / docs / ergonomics.

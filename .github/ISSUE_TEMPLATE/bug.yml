@@ -1,0 +1,79 @@
+name: Bug report
+description: A defect in existing behavior. For security vulnerabilities, see SECURITY.md instead.
+title: "bug: <short summary>"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Before you continue:
+
+        - **Security vulnerability?** Stop and use the private security advisory flow: https://github.com/geminimir/warden/security/advisories/new
+        - **Question or usage help?** Please use [Discussions](https://github.com/geminimir/warden/discussions).
+
+  - type: checkboxes
+    id: not-security
+    attributes:
+      label: This is not a security vulnerability
+      description: A vulnerability is anything that violates safety (G1), fidelity (G2), temporal (G4), or audit (G5). See SECURITY.md.
+      options:
+        - label: I confirm this is not a security vulnerability. If it is, I will close this issue and use the private advisory flow instead.
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: A clear, concise description of the bug.
+      placeholder: When I do X, Warden returns Y — I expected Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: The smallest tuple graph, sequence of calls, or configuration that demonstrates the issue. Paste code, not screenshots.
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect Warden to do? Which invariant do you think was broken?
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: e.g., v0.1.0 or a commit SHA.
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "3.11.9"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: macOS 14 / Ubuntu 22.04 / WSL
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / stack trace
+      description: If any. Please redact anything sensitive.
+      render: shell
