@@ -1,0 +1,149 @@
+# Warden
+
+**Permission-aware retrieval and agent-authorization gateway for AI systems.**
+
+> Warden enforces relationship-based, deny-aware, cross-tenant document permissions *inside* the retrieval path of agentic RAG systems — behind a fail-closed security boundary, with agent-context revalidation and a tamper-evident audit trail.
+
+Every existing tool answers *"can user U read document D?"*
+None of them answer *"what should this agent be allowed to retrieve, keep in context, and cite — right now?"*
+
+---
+
+## The problem, in one paragraph
+
+The two obvious designs both fail.
+
+- **Post-filter** (retrieve top-K, then check permissions) is safe but **recall collapses under selectivity**. If a principal is authorized on 1% of the corpus, top-50 by pure similarity contains ~0.5 authorized docs in expectation.
+- **Pre-filter by expanded ID list** (`SpiceDB.LookupResources`, `OpenFGA.ListObjects`) preserves recall but is **O(|Authorized(u)|)**. A firm-wide partner is authorized on 10⁷+ documents. You cannot ship a ten-million-element `IN` clause into an ANN query.
+
+Warden flattens the authorization graph into small **capability-label** sets that push down into the vector index as an `int[]` overlap predicate — **O(1) in corpus size** — and then treats that filter as a *performance optimization only*. The security boundary is a separate fail-closed check against the graph itself, on the small candidate set, right before anything enters the model's context.
+
+---
+
+## Architecture — the three gates
+
+```
+    agent tool call: retrieve(query)         ← principal is bound server-side to the session
+              │                                (NEVER a model-supplied argument)
+              ▼
+   ┌─ GATE 1 · PRE-FILTER ────────────────────────────────────┐  performance
+   │  L(u), B(u) from Redis  [may be stale — permissive only] │
+   │  ANN search inside org partition, predicate pushed down: │
+   │      acl_labels && L(u)  AND NOT (barrier_tags && B(u))  │
+   │  over-fetch K' = 1.5·K                                   │
+   └───────────────────────────┬──────────────────────────────┘
+                               ▼ K' candidates
+   ┌─ GATE 2 · AUTHORITATIVE CHECK ───────────────────────────┐  ← THE SECURITY BOUNDARY
+   │  check(u, read, d) against the tuple graph. FAIL-CLOSED. │
+   │  deny > allow. expiry enforced. audit row + reason_path. │
+   └───────────────────────────┬──────────────────────────────┘
+                               ▼ authorized top-K → LLM context
+   ┌─ GATE 3 · SESSION REVALIDATION ──────────────────────────┐  temporal
+   │  before EVERY model call: re-check all context doc refs  │
+   │  evict revoked → inject "[N sources removed]" → replan   │
+   │  before final answer: re-check every citation            │
+   └──────────────────────────────────────────────────────────┘
+```
+
+### Two invariants everything rests on
+
+1. **Gate 1 is an optimization; Gate 2 is the boundary.** A stale cache, a bad label, a pgvector quirk — none can leak, because Gate 2 re-checks the graph. Gate 1 exists so Gate 2 is cheap. Gate 2 exists so Gate 1 is allowed to be wrong.
+2. **`LabelFilter(u) ⊇ Authorized(u)`** — the pre-filter must be a *permissive superset*. Therefore **stale revocations are safe** (Gate 2 catches them) and **stale grants silently destroy recall** (nothing catches them). Grants propagate eagerly; revocations may propagate lazily. This inverts the naive intuition.
+
+**Why prompt injection fails against this:** the model can influence the *query string*. It cannot influence *who is asking*. The principal is bound to the session server-side and is never a tool parameter. Authorization is enforced at the tool boundary, not by the model's good behavior — because model alignment is not a security control.
+
+---
+
+## Tech stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| Language | Python 3.11+ | FastAPI ecosystem, Hypothesis, LLM SDKs |
+| API | FastAPI | Typed, async, OpenAPI-native |
+| Storage | Postgres 16 + pgvector 0.8+ | ReBAC tuples, vectors, audit — one transaction boundary, no distributed consistency to hand-wave |
+| Cache | Redis | `labels:{principal}:{epoch}` with write-through invalidation |
+| Vector index | pgvector HNSW + GIN on `int[]` | Filtered ANN with iterative index scan |
+| Testing | Hypothesis + pytest | Property-based differential tests vs. a reference oracle |
+| Packaging | Docker Compose | One-command setup |
+| CI | GitHub Actions | Property tests + 10-scenario suite + `make bench` on every PR |
+
+Pluggable `AuthzBackend` protocol ships with two implementations: our native Postgres engine, and an **OpenFGA** adapter for teams that already run one.
+
+---
+
+## Repo layout
+
+```
+warden/
+├── core/
+│   ├── algebra.py         # formal permission semantics
+│   ├── oracle.py          # brute-force ground truth — DO NOT OPTIMIZE
+│   ├── rebac.py           # check() / expand() / ReasonPath
+│   ├── barriers.py        # deny layer + tag encoding
+│   └── labels.py          # materialization, epochs, Redis cache
+├── retrieval/
+│   ├── index.py           # pgvector, partitioning
+│   └── strategies.py      # exact | iterative | partitioned
+├── gateway/
+│   ├── gates.py           # 1, 2, 3
+│   ├── session.py         # typed context refs
+│   ├── audit.py           # hash chain + verify
+│   └── api.py             # FastAPI
+├── backends/
+│   ├── protocol.py        # AuthzBackend
+│   ├── postgres.py
+│   └── openfga.py
+├── agent/                 # minimal real agent loop
+├── evals/
+│   ├── generators.py      # Hypothesis strategies
+│   ├── differential.py    # vs. oracle
+│   ├── scenarios/         # the 10 adversarial cases
+│   ├── baseline.py        # naive RAG
+│   └── bench/             # the 4 tables
+├── profiles/legal.yaml
+├── demo/
+└── docker-compose.yml
+```
+
+---
+
+## Milestones
+
+Ship in order. Each milestone has open issues linked to it.
+
+| # | Milestone | What ships |
+|---|---|---|
+| [W0](../../milestone/1) | Reference oracle + property harness | Formal algebra, brute-force oracle, adversarial graph generators |
+| [W1](../../milestone/2) | ReBAC core | Postgres schema, `check()` with reason paths, information barriers |
+| [W2](../../milestone/3) | Labels + retrieval index | Materialization + Redis, pgvector + GIN + partitioning, three ANN strategies |
+| [W3](../../milestone/4) | Gateway + agent lifecycle | FastAPI, session refs, Gate 3, hash-chained audit, real agent loop |
+| [W4](../../milestone/5) | Eval harness + benchmarks | 10-scenario suite + naive baseline, four benchmark tables |
+| [W5](../../milestone/6) | Ship it | OpenFGA adapter, docker-compose + CI, 30-second demo UI |
+
+---
+
+## Non-goals
+
+Stated explicitly because naming what we *didn't* build is a seniority signal.
+
+- **Not an authorization engine** competing with SpiceDB or OpenFGA. Warden is the *gateway* that composes an authz model with a retrieval path and an agent lifecycle. Native engine so it works standalone; adapter so it doesn't have to.
+- **Not a vector database.** pgvector is an implementation detail.
+- **Not production-hardened.** Single-node, synthetic benchmarks. Numbers will say so plainly.
+- **Not a hallucination checker.** Citation stripping here is an *access-control* mechanism, not a correctness one.
+
+---
+
+## Quick start
+
+```bash
+docker-compose up          # Postgres + pgvector + Redis + API + seeded demo corpus
+make test                  # property tests + 10 scenarios
+make bench                 # four benchmark tables (smoke scale)
+make demo                  # split-screen UI at http://localhost:3000
+```
+
+---
+
+## License
+
+TBD.
