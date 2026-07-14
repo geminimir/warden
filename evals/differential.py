@@ -61,8 +61,20 @@ _hyp = settings(
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large],
 )
 
+# xfail with strict=True + raises=EngineNotImplemented is deliberate:
+#   - today, the tests raise EngineNotImplemented -> XFAIL -> build stays green.
+#   - the moment W1 wires a real check() into `_engine_check`, these tests will
+#     start passing -> XPASS -> strict=True fails the build, forcing us to
+#     remove the marker and turn them into real gates. That's the whole point.
+_pending_engine = pytest.mark.xfail(
+    reason="requires W1 engine (core/rebac.py) — see #4/#5/#6",
+    raises=EngineNotImplemented,
+    strict=True,
+)
+
 
 @pytest.mark.differential
+@_pending_engine
 @_hyp
 @given(graph=authz_graphs())
 def test_safety_engine_never_returns_docs_the_oracle_denies(graph: Graph) -> None:
@@ -84,6 +96,7 @@ def test_safety_engine_never_returns_docs_the_oracle_denies(graph: Graph) -> Non
 
 
 @pytest.mark.differential
+@_pending_engine
 @_hyp
 @given(graph=authz_graphs())
 def test_fidelity_engine_returns_everything_the_oracle_allows(graph: Graph) -> None:
@@ -103,6 +116,7 @@ def test_fidelity_engine_returns_everything_the_oracle_allows(graph: Graph) -> N
 
 
 @pytest.mark.differential
+@_pending_engine
 @_hyp
 @given(graph=authz_graphs())
 def test_pointwise_check_matches_oracle(graph: Graph) -> None:

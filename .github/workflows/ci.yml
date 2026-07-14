@@ -19,9 +19,8 @@ jobs:
       - run: pytest tests/test_oracle.py tests/test_generators.py -v
 
   differential:
-    name: Differential harness (expected to fail until W1)
+    name: Differential harness (xfail until W1, XPASS breaks build)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,7 +28,8 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
-      # This job is informational until W1 lands. Once rebac.check() is wired
-      # into evals/differential.py, remove `continue-on-error: true` above and
-      # this becomes a required check.
+      # Marked xfail(strict=True) in evals/differential.py until W1 lands the
+      # real engine. When W1 wires check() in, the tests will XPASS and this
+      # job will fail — forcing removal of the marker, at which point the
+      # harness becomes a real gate.
       - run: pytest -m differential -v
