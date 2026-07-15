@@ -151,18 +151,26 @@ def _barrier(draw, barrier_id: int) -> Barrier:
 # ---------------------------------------------------------------------------
 
 @st.composite
-def _document(draw, org: str, barrier_ids: list[int]) -> Document:
-    """A doc in `org`, optionally tagged behind one or more barriers.
+def _document(draw, doc_id: str, org: str, barrier_ids: list[int]) -> Document:
+    """A doc with a caller-supplied `doc_id` (so callers can enforce uniqueness),
+    optionally tagged behind one or more barriers.
 
     Half the time: no barrier tags at all (the "open" corpus doc case).
     Otherwise: a small subset of the graph's barriers, each with a random side.
+
+    Note on why `doc_id` is a caller arg: Document.id is a primary key in the
+    real schema. A frozenset of Documents with duplicate ids but distinct
+    barrier_tags is illegal in Postgres (unique(id)); if we generate such a
+    graph, the oracle and engine may pick different rows nondeterministically
+    via iteration order, producing a spurious differential failure. See
+    authz_graphs() for how uniqueness is enforced.
     """
     if not barrier_ids or draw(st.booleans()):
         tags: frozenset[int] = frozenset()
     else:
         picked = draw(st.lists(st.sampled_from(barrier_ids), min_size=1, max_size=2, unique=True))
         tags = frozenset(tag(b, draw(st.sampled_from([0, 1]))) for b in picked)
-    return Document(id=draw(doc_ids), org_id=org, barrier_tags=tags)
+    return Document(id=doc_id, org_id=org, barrier_tags=tags)
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +212,14 @@ def authz_graphs(draw) -> Graph:
     # Pick one org for the documents. In W2 we'll broaden this to
     # multi-partition scenarios; for W0 the interesting stuff is intra-org.
     org = draw(org_ids)
-    documents = frozenset(draw(_document(org, barrier_ids)) for _ in range(n_docs))
+
+    # Enforce unique doc IDs — Document.id is a PK in the real schema.
+    unique_doc_ids = draw(
+        st.lists(doc_ids, min_size=1, max_size=n_docs, unique=True)
+    )
+    documents = frozenset(
+        draw(_document(did, org, barrier_ids)) for did in unique_doc_ids
+    )
 
     return Graph(tuples=frozenset(tuples), barriers=barriers, documents=documents)
 

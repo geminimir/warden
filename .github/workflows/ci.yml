@@ -7,7 +7,7 @@ on:
 
 jobs:
   oracle:
-    name: Oracle + generator tests (must be green)
+    name: Oracle + engine + generator fixtures
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,10 +16,10 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
-      - run: pytest tests/test_oracle.py tests/test_generators.py -v
+      - run: pytest tests/test_oracle.py tests/test_rebac.py tests/test_generators.py -v
 
   differential:
-    name: Differential harness (xfail until W1, XPASS breaks build)
+    name: Differential harness (5000 examples — W1 acceptance gate)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,8 +28,35 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
-      # Marked xfail(strict=True) in evals/differential.py until W1 lands the
-      # real engine. When W1 wires check() in, the tests will XPASS and this
-      # job will fail — forcing removal of the marker, at which point the
-      # harness becomes a real gate.
-      - run: pytest -m differential -v
+      # 5000 examples: the W1 acceptance criterion from warden-engineering-doc.md.
+      # Any disagreement between core/oracle.py and core/rebac.py on any generated
+      # graph will fail this job.
+      - run: WARDEN_HYP_MAX=5000 pytest -m differential -v
+
+  postgres-integration:
+    name: PostgresStore integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: warden
+          POSTGRES_PASSWORD: warden
+          POSTGRES_DB: warden
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U warden -d warden"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - run: pytest tests/test_postgres_store.py -v
+        env:
+          WARDEN_TEST_DB_URL: postgres://warden:warden@localhost:5432/warden

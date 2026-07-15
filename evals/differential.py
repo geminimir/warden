@@ -1,19 +1,21 @@
 """
 Differential harness: compare the real engine to the reference oracle.
 
-The three properties this checks — the same three from Part 4 of the design doc
-— apply to every implementation the harness runs against. In W0, no engine
-exists yet, so this file's tests fail. **That is the correct state for W0
-acceptance.** Once W1 lands the real `check()`, wire it into `_engine_check` /
-`_engine_authorized_set` below and the tests should go green across at least
-5,000 generated graphs.
+Every property test in this file compares `core.rebac` against `core.oracle`
+across randomly generated authorization graphs. If they ever disagree on a
+green build, one of them is wrong — most likely rebac, because oracle is
+brute-force and has no room to hide bugs.
 
-    Read this as a spec, not as a work item. The pluggable seam is the engine
-    adapter functions at the bottom of this file.
+    Wire is: oracle vs. rebac. The two implementations share nothing but the
+    types in core/algebra.py. Different data structures, different traversal
+    algorithms (BFS vs. DFS), different code paths for barrier evaluation.
+    A bug common to both would have to originate in algebra.py, which is
+    small enough to eyeball.
 """
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 
 import pytest
@@ -21,29 +23,24 @@ from hypothesis import HealthCheck, given, settings
 
 from core.algebra import Graph, Object, Subject
 from core.oracle import Oracle, all_principals
+from core.rebac import authorized_set as rebac_authorized_set
+from core.rebac import check as rebac_check
+from core.store import InMemoryStore
 from evals.generators import NOW, authz_graphs
 
 
 # ---------------------------------------------------------------------------
-# Engine adapter (the seam that W1 plugs into)
+# Engine adapter (kept as a seam so a PostgresStore-backed engine can be
+# swapped in for the W1.1 integration job without duplicating the harness).
 # ---------------------------------------------------------------------------
 
-class EngineNotImplemented(Exception):
-    """Raised until the real engine (W1) exists. That's the correct W0 state."""
+def _engine_check(graph: Graph, principal: Subject, obj: Object, at: datetime) -> bool:
+    ok, _ = rebac_check(InMemoryStore(graph), principal, obj, at)
+    return ok
 
 
-def _engine_check(_graph: Graph, _principal: Subject, _obj: Object, _at: datetime) -> bool:
-    """Placeholder for the real engine's check(). Wire W1's rebac.check() here."""
-    raise EngineNotImplemented(
-        "core.rebac.check() does not exist yet. W1 is where this gets wired up; "
-        "until then the differential tests fail on purpose — that's how you know "
-        "the harness is real."
-    )
-
-
-def _engine_authorized_set(_graph: Graph, _principal: Subject, _at: datetime) -> set[str]:
-    """Placeholder for the real engine's bulk API."""
-    raise EngineNotImplemented("W1 not landed yet.")
+def _engine_authorized_set(graph: Graph, principal: Subject, at: datetime) -> set[str]:
+    return rebac_authorized_set(InMemoryStore(graph), principal, at, graph.documents)
 
 
 # ---------------------------------------------------------------------------
@@ -51,30 +48,20 @@ def _engine_authorized_set(_graph: Graph, _principal: Subject, _at: datetime) ->
 # ---------------------------------------------------------------------------
 
 # Hypothesis settings tuned for this suite:
-#   - max_examples: 200 in dev; CI can crank this up (design doc: >= 5,000 for
-#     the W1 acceptance gate).
+#   - max_examples: 200 by default (fast local dev loop).
+#     Override via WARDEN_HYP_MAX for CI — the design doc names 5000 as the
+#     W1 acceptance gate; the CI workflow sets that value.
 #   - deadline: disabled — the oracle is O(n^2) by design and can be slow on
 #     large graphs. That's fine; correctness is the point.
+_MAX_EXAMPLES = int(os.environ.get("WARDEN_HYP_MAX", "200"))
+
 _hyp = settings(
-    max_examples=200,
+    max_examples=_MAX_EXAMPLES,
     deadline=None,
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large],
 )
 
-# xfail with strict=True + raises=EngineNotImplemented is deliberate:
-#   - today, the tests raise EngineNotImplemented -> XFAIL -> build stays green.
-#   - the moment W1 wires a real check() into `_engine_check`, these tests will
-#     start passing -> XPASS -> strict=True fails the build, forcing us to
-#     remove the marker and turn them into real gates. That's the whole point.
-_pending_engine = pytest.mark.xfail(
-    reason="requires W1 engine (core/rebac.py) — see #4/#5/#6",
-    raises=EngineNotImplemented,
-    strict=True,
-)
-
-
 @pytest.mark.differential
-@_pending_engine
 @_hyp
 @given(graph=authz_graphs())
 def test_safety_engine_never_returns_docs_the_oracle_denies(graph: Graph) -> None:
@@ -96,7 +83,6 @@ def test_safety_engine_never_returns_docs_the_oracle_denies(graph: Graph) -> Non
 
 
 @pytest.mark.differential
-@_pending_engine
 @_hyp
 @given(graph=authz_graphs())
 def test_fidelity_engine_returns_everything_the_oracle_allows(graph: Graph) -> None:
@@ -116,7 +102,6 @@ def test_fidelity_engine_returns_everything_the_oracle_allows(graph: Graph) -> N
 
 
 @pytest.mark.differential
-@_pending_engine
 @_hyp
 @given(graph=authz_graphs())
 def test_pointwise_check_matches_oracle(graph: Graph) -> None:
