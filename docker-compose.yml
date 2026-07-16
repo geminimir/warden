@@ -1,0 +1,34 @@
+# Warden dev + integration-test stack.
+#
+# Just Postgres for now (W1). pgvector, Redis, API, and the seeded demo corpus
+# join in W2/W3/W5 respectively. Kept intentionally minimal — one command to
+# get the DB up.
+#
+#   docker compose up -d postgres     # start Postgres in the background
+#   make postgres-integration         # run the integration tests
+#   docker compose down               # tear down
+#
+# The volume is unnamed so `docker compose down -v` wipes it clean between
+# integration runs. If you want to persist data across runs (dev use), give
+# the volume a name.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: warden_postgres
+    environment:
+      POSTGRES_USER: warden
+      POSTGRES_PASSWORD: warden
+      POSTGRES_DB: warden
+    ports:
+      - "5432:5432"
+    # Migrations are applied by the test fixture / API startup (see
+    # core/postgres_store.py:apply_migrations), NOT by mounting sql/ into
+    # docker-entrypoint-initdb.d. Reason: mounting from paths like iCloud
+    # Drive or WSL bind-mounts is flaky, and applying schema in code keeps
+    # dev, test, and prod on the same code path.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U warden -d warden"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
