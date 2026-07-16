@@ -12,6 +12,7 @@ the oracle fixture tests.
 
 from evals.differential import (  # noqa: F401
     test_fidelity_engine_returns_everything_the_oracle_allows,
+    test_label_filter_is_permissive_superset,
     test_pointwise_check_matches_oracle,
     test_safety_engine_never_returns_docs_the_oracle_denies,
 )

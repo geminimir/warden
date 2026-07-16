@@ -1,20 +1,17 @@
 # Warden dev + integration-test stack.
 #
-# Just Postgres for now (W1). pgvector, Redis, API, and the seeded demo corpus
-# join in W2/W3/W5 respectively. Kept intentionally minimal — one command to
-# get the DB up.
+#   docker compose up -d           # bring everything up
+#   make postgres-integration      # W1 CRUD tests
+#   make pgvector-integration      # W2 retrieval tests
+#   docker compose down -v         # tear down + wipe volumes
 #
-#   docker compose up -d postgres     # start Postgres in the background
-#   make postgres-integration         # run the integration tests
-#   docker compose down               # tear down
-#
-# The volume is unnamed so `docker compose down -v` wipes it clean between
-# integration runs. If you want to persist data across runs (dev use), give
-# the volume a name.
+# Postgres uses the pgvector image (W2 requires the vector extension).
+# Redis backs the label cache with asymmetric invalidation semantics
+# (grants: write-through; revocations: TTL). See core/labels.py.
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: warden_postgres
     environment:
       POSTGRES_USER: warden
@@ -29,6 +26,17 @@ services:
     # dev, test, and prod on the same code path.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U warden -d warden"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  redis:
+    image: redis:7-alpine
+    container_name: warden_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 2s
       timeout: 3s
       retries: 15

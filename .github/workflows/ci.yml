@@ -16,7 +16,7 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
-      - run: pytest tests/test_oracle.py tests/test_rebac.py tests/test_generators.py -v
+      - run: pytest tests/test_oracle.py tests/test_rebac.py tests/test_labels.py tests/test_generators.py -v
 
   differential:
     name: Differential harness (5000 examples — W1 acceptance gate)
@@ -33,12 +33,12 @@ jobs:
       # graph will fail this job.
       - run: WARDEN_HYP_MAX=5000 pytest -m differential -v
 
-  postgres-integration:
-    name: PostgresStore integration tests
+  integration:
+    name: Postgres + pgvector + Redis integration tests
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: warden
           POSTGRES_PASSWORD: warden
@@ -50,6 +50,15 @@ jobs:
           --health-interval 2s
           --health-timeout 3s
           --health-retries 15
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -57,6 +66,11 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
-      - run: pytest tests/test_postgres_store.py -v
+      - run: |
+          pytest \
+            tests/test_postgres_store.py \
+            tests/test_retrieval_pgvector.py \
+            tests/test_labels_redis.py -v
         env:
           WARDEN_TEST_DB_URL: postgres://warden:warden@localhost:5432/warden
+          WARDEN_TEST_REDIS_URL: redis://localhost:6379/0

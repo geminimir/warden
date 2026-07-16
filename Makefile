@@ -1,5 +1,6 @@
-.PHONY: install test lint format oracle rebac differential differential-gate \
-        postgres-up postgres-down postgres-integration
+.PHONY: install test lint format oracle rebac labels differential differential-gate \
+        stack-up stack-down postgres-integration pgvector-integration redis-integration \
+        integration
 
 install:
 	python3 -m venv .venv
@@ -17,27 +18,50 @@ oracle:
 rebac:
 	.venv/bin/pytest tests/test_rebac.py -v
 
+# Handwritten label / cache fixtures. MUST be green.
+labels:
+	.venv/bin/pytest tests/test_labels.py -v
+
 # Property tests vs. oracle at the dev default of 200 examples.
+# Includes the W1 pointwise-check property and the W2 superset property.
 differential:
 	.venv/bin/pytest -m differential -v
 
-# The W1 acceptance gate: 5000 examples. Slow (~2 min); run before pushing.
+# The acceptance gate: 5000 examples. Slow (~2-3 min); run before pushing.
 differential-gate:
 	WARDEN_HYP_MAX=5000 .venv/bin/pytest -m differential -v
 
-postgres-up:
-	docker compose up -d postgres
-	@echo "Waiting for Postgres to be ready..."
-	@until docker compose exec postgres pg_isready -U warden -d warden >/dev/null 2>&1; do sleep 1; done
+stack-up:
+	docker compose up -d
+	@echo "Waiting for services to be ready..."
+	@until docker exec warden_postgres pg_isready -U warden -d warden >/dev/null 2>&1; do sleep 1; done
+	@until docker exec warden_redis redis-cli ping >/dev/null 2>&1; do sleep 1; done
 
-postgres-down:
+stack-down:
 	docker compose down -v
 
-# Integration tests for PostgresStore. Requires `make postgres-up` first
-# (or WARDEN_TEST_DB_URL set to a running instance).
-postgres-integration: postgres-up
+# W1: tuple CRUD against real Postgres.
+postgres-integration: stack-up
 	WARDEN_TEST_DB_URL=postgres://warden:warden@localhost:5432/warden \
 	    .venv/bin/pytest tests/test_postgres_store.py -v
+
+# W2: pgvector retrieval strategies against real Postgres+pgvector.
+pgvector-integration: stack-up
+	WARDEN_TEST_DB_URL=postgres://warden:warden@localhost:5432/warden \
+	    .venv/bin/pytest tests/test_retrieval_pgvector.py -v
+
+# W2: label cache against real Redis.
+redis-integration: stack-up
+	WARDEN_TEST_REDIS_URL=redis://localhost:6379/0 \
+	    .venv/bin/pytest tests/test_labels_redis.py -v
+
+# All integration tests. Requires Docker.
+integration: stack-up
+	WARDEN_TEST_DB_URL=postgres://warden:warden@localhost:5432/warden \
+	WARDEN_TEST_REDIS_URL=redis://localhost:6379/0 \
+	    .venv/bin/pytest tests/test_postgres_store.py \
+	                     tests/test_retrieval_pgvector.py \
+	                     tests/test_labels_redis.py -v
 
 lint:
 	.venv/bin/ruff check .
