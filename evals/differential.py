@@ -22,6 +22,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 
 from core.algebra import Graph, Object, Subject
+from core.labels import labels_for, materialize_doc_labels
 from core.oracle import Oracle, all_principals
 from core.rebac import authorized_set as rebac_authorized_set
 from core.rebac import check as rebac_check
@@ -119,3 +120,50 @@ def test_pointwise_check_matches_oracle(graph: Graph) -> None:
                 f"DISAGREEMENT on ({principal}, doc:{doc.id}): "
                 f"oracle={oracle_allow}, engine={engine_allow}"
             )
+
+
+@pytest.mark.differential
+@_hyp
+@given(graph=authz_graphs())
+def test_label_filter_is_permissive_superset(graph: Graph) -> None:
+    """SUPERSET (the W2 acceptance gate).
+
+    For every principal:
+
+        LabelFilter(u) ⊇ Authorized(u)
+
+    where
+        LabelFilter(u) = { d : acl_labels(d) ∩ L(u) ≠ ∅
+                              AND barrier_tags(d) ∩ B(u) = ∅ }
+        Authorized(u) = the oracle's ground truth
+
+    A missing doc from LabelFilter is a silent recall bug: the doc is
+    reachable per the graph, but the pre-filter would never surface it to
+    Gate 2. Nothing downstream catches this, so this property test is the
+    only guard.
+
+    The reverse inclusion (LabelFilter ⊇ Authorized only, not equality) is
+    load-bearing: the pre-filter is ALLOWED to over-permit — Gate 2 catches
+    the extras. Under-permitting is the failure mode.
+    """
+    store = InMemoryStore(graph)
+    oracle = Oracle(graph)
+    for principal in all_principals(graph):
+        L, B = labels_for(store, principal)
+        label_filter_set: set[str] = set()
+        for doc in graph.documents:
+            doc_labels = materialize_doc_labels(store, doc.id)
+            if not (doc_labels & L):
+                continue
+            if doc.barrier_tags & B:
+                continue
+            label_filter_set.add(doc.id)
+        oracle_set = oracle.authorized_set(principal, NOW)
+        missing = oracle_set - label_filter_set
+        assert not missing, (
+            f"SILENT RECALL LOSS: docs {missing} for {principal} would pass the "
+            f"oracle but are missing from LabelFilter — the pre-filter is not a "
+            f"permissive superset.\n"
+            f"  oracle_set       = {sorted(oracle_set)}\n"
+            f"  label_filter_set = {sorted(label_filter_set)}"
+        )
