@@ -1,6 +1,7 @@
-.PHONY: install test lint format oracle rebac labels differential differential-gate \
+.PHONY: install test lint format oracle rebac labels gates api scenarios \
+        differential differential-gate \
         stack-up stack-down postgres-integration pgvector-integration redis-integration \
-        integration
+        integration serve
 
 install:
 	python3 -m venv .venv
@@ -21,6 +22,22 @@ rebac:
 # Handwritten label / cache fixtures. MUST be green.
 labels:
 	.venv/bin/pytest tests/test_labels.py -v
+
+# W3 gateway fixtures.
+gates:
+	.venv/bin/pytest tests/test_session.py tests/test_audit.py tests/test_gates.py -v
+
+# FastAPI surface tests (TestClient, in-memory).
+api:
+	.venv/bin/pytest tests/test_api.py -v
+
+# W3 acceptance gate: scenarios 4 (in-flight revocation) and 10 (prompt injection).
+scenarios:
+	.venv/bin/pytest tests/test_scenarios.py -v
+
+# Boot the gateway locally against in-memory backends. Useful for the demo.
+serve:
+	.venv/bin/uvicorn --factory gateway.demo:app --reload --port 8000
 
 # Property tests vs. oracle at the dev default of 200 examples.
 # Includes the W1 pointwise-check property and the W2 superset property.
