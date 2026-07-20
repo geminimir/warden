@@ -27,6 +27,10 @@ jobs:
             tests/test_api.py \
             tests/test_scenarios.py \
             tests/test_generators.py -v
+      - name: Bench (smoke — generates docs/bench/*.md)
+        run: python -m evals.bench.run
+      - name: Adversarial suite report
+        run: python -m evals.scenarios.run_all
 
   differential:
     name: Differential harness (5000 examples — W1 acceptance gate)

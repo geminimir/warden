@@ -1,5 +1,5 @@
-.PHONY: install test lint format oracle rebac labels gates api scenarios \
-        differential differential-gate \
+.PHONY: install test lint format oracle rebac labels gates api scenarios scenarios-report \
+        differential differential-gate bench \
         stack-up stack-down postgres-integration pgvector-integration redis-integration \
         integration serve
 
@@ -31,9 +31,17 @@ gates:
 api:
 	.venv/bin/pytest tests/test_api.py -v
 
-# W3 acceptance gate: scenarios 4 (in-flight revocation) and 10 (prompt injection).
+# W3+W4 acceptance gate: all 10 adversarial scenarios.
 scenarios:
 	.venv/bin/pytest tests/test_scenarios.py -v
+
+# Prints the Harvey-blog-style suite table with leak counts.
+scenarios-report:
+	.venv/bin/python -m evals.scenarios.run_all
+
+# W4 benchmark tables (writes docs/bench/*.md). ~30s at CI-friendly scale.
+bench:
+	.venv/bin/python -m evals.bench.run
 
 # Boot the gateway locally against in-memory backends. Useful for the demo.
 serve:
